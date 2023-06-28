@@ -629,6 +629,8 @@ RUN if [ "$WITH_WS_NETWORKING_PROXY" = "yes" ]; \
 "dynCall_viiiiiii",\
 "dynCall_viiiiiiii",'; \
     export ASYNCIFY_ONLY=$'"__fwritex",\
+"zif_stream_get_contents",\
+"php_stdiop_read",\
 "fwrite",\
 "zif_fwrite",\
 "php_stdiop_write",\

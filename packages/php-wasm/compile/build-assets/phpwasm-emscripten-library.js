@@ -209,19 +209,6 @@ const LibraryExample = {
 			stdio: ["pipe", "pipe", "pipe"],
 			timeout: 100
 		});
-		// log on cp close
-		cp.on('error', (code) => {
-			console.log(`child process errored with code ${code}`);
-		});
-		cp.on('close', (code) => {
-			console.log(`child process closed with code ${code}`);
-		});
-		cp.on('exit', (code) => {
-			console.log(`child process exited with code ${code}`);
-		});
-		   
-		// This doesn't seem to work:
-		cp.stdin.setEncoding('utf-8');
 	   
 		if (PHPWASM.callback_pipes && procopenCallId in PHPWASM.callback_pipes) {
 		   PHPWASM.callback_pipes[procopenCallId].onData(function (data) {
@@ -232,22 +219,34 @@ const LibraryExample = {
 			   cp.stdin.write(dataStr);
 		   });
 		}
+		
+		// -1 is an extremely naive way of computing parentend
+		// @TODO pass this in from PHP
 		const stdoutStream = SYSCALLS.getStreamFromFD(stdoutFd);
+		cp.on("exit", function (data) {
+			PHPWASM.proc_fds[stdoutFd - 1].exited = true;
+			PHPWASM.proc_fds[stdoutFd - 1].emit("data");
+			PHPWASM.proc_fds[stderrFd - 1].exited = true;
+			PHPWASM.proc_fds[stderrFd - 1].emit("data");
+		});
+		PHPWASM.proc_fds[stdoutFd - 1] = new EventEmitter();
+		PHPWASM.proc_fds[stderrFd - 1] = new EventEmitter();
+	
+		cp.stdout.on("data", function (data) {
+			console.log("Writing data", data.toString());
+			PHPWASM.proc_fds[stdoutFd - 1].hasData = true;
+			PHPWASM.proc_fds[stdoutFd - 1].emit("data");
+			stdoutStream.stream_ops.write(stdoutStream, data, 0, data.length, 0);
+		});
+	
+		// -1 is an extremely naive way of computing parentend
+		// @TODO pass this in from PHP
 		const stderrStream = SYSCALLS.getStreamFromFD(stderrFd);
-		cp.stdout.on("data", function(data) {
-		 stdoutStream.stream_ops.write(stdoutStream, data, 0, data.length, 0);
-		});
 		cp.stderr.on("data", function(data) {
-		 stderrStream.stream_ops.write(stderrStream, data, 0, data.length, 0);
-		});
-		return Asyncify.handleSleep(wakeUp => {
-			// setTimeout is needed because otherwise
-			// we'll finish synchronously and JS will
-			// not get a chance to write the data to
-			// the stdout stream
-			setTimeout(() => {
-			   wakeUp();
-			}, 10);
+			console.log("Writing error", data.toString());
+			PHPWASM.proc_fds[stderrFd - 1].hasData = true;
+			PHPWASM.proc_fds[stderrFd - 1].emit("data");
+			stderrStream.stream_ops.write(stderrStream, data, 0, data.length, 0);
 		});
 	},
 
@@ -277,49 +276,60 @@ const LibraryExample = {
 		const POLLNVAL = 0x0020; /* Invalid request: fd not open */
 
 		return Asyncify.handleSleep((wakeUp) => {
-			const sock = getSocketFromFD(socketd);
-			if (!sock) {
-				wakeUp(0);
-				return;
-			}
 			const polls = [];
-			const lookingFor = new Set();
-	
-			if (events & POLLIN || events & POLLPRI) {
-				if (sock.server) {
-					for (const client of sock.pending) {
-						if ((client.recv_queue || []).length > 0) {
-							wakeUp(1);
-							return;
-						}
-					}
-				} else if ((sock.recv_queue || []).length > 0) {
-					wakeUp(1);
+			if (PHPWASM.proc_fds && socketd in PHPWASM.proc_fds) {
+				const emitter = PHPWASM.proc_fds[socketd];
+				if (emitter.exited) {
+					wakeUp(0);
 					return;
 				}
-			}
-
-			const webSockets = PHPWASM.getAllWebSockets(sock);
-			if (!webSockets.length) {
-				wakeUp(0);
-				return;
-			}
-			for (const ws of webSockets) {
+				polls.push(
+					PHPWASM.awaitWsEvent(emitter, 'data')
+				);
+			} else {
+				const sock = getSocketFromFD(socketd);
+				if (!sock) {
+					wakeUp(0);
+					return;
+				}
+				const lookingFor = new Set();
+		
 				if (events & POLLIN || events & POLLPRI) {
-					polls.push(PHPWASM.awaitData(ws));
-					lookingFor.add("POLLIN");
+					if (sock.server) {
+						for (const client of sock.pending) {
+							if ((client.recv_queue || []).length > 0) {
+								wakeUp(1);
+								return;
+							}
+						}
+					} else if ((sock.recv_queue || []).length > 0) {
+						wakeUp(1);
+						return;
+					}
 				}
-				if (events & POLLOUT) {
-					polls.push(PHPWASM.awaitConnection(ws));
-					lookingFor.add("POLLOUT");
+
+				const webSockets = PHPWASM.getAllWebSockets(sock);
+				if (!webSockets.length) {
+					wakeUp(0);
+					return;
 				}
-				if (events & POLLHUP) {
-					polls.push(PHPWASM.awaitClose(ws));
-					lookingFor.add("POLLHUP");
-				}
-				if (events & POLLERR || events & POLLNVAL) {
-					polls.push(PHPWASM.awaitError(ws));
-					lookingFor.add("POLLERR");
+				for (const ws of webSockets) {
+					if (events & POLLIN || events & POLLPRI) {
+						polls.push(PHPWASM.awaitData(ws));
+						lookingFor.add("POLLIN");
+					}
+					if (events & POLLOUT) {
+						polls.push(PHPWASM.awaitConnection(ws));
+						lookingFor.add("POLLOUT");
+					}
+					if (events & POLLHUP) {
+						polls.push(PHPWASM.awaitClose(ws));
+						lookingFor.add("POLLHUP");
+					}
+					if (events & POLLERR || events & POLLNVAL) {
+						polls.push(PHPWASM.awaitError(ws));
+						lookingFor.add("POLLERR");
+					}
 				}
 			}
 			if (polls.length === 0) {
@@ -333,22 +343,27 @@ const LibraryExample = {
 			const promises = polls.map(([promise]) => promise);
 			const clearPolling = () => polls.forEach(([, clear]) => clear());
 			let awaken = false;
+			let timeoutId;
 			Promise.race(promises).then(function(results) {
 				if (!awaken) {
 					awaken = true;
 					wakeUp(1);
-					clearTimeout(timeoutId);
+					if (timeoutId) {
+						clearTimeout(timeoutId);
+					}
 					clearPolling();
 				}
 			});
 
-			const timeoutId = setTimeout(function() {
-				if (!awaken) {
-					awaken = true;
-					wakeUp(0);
-					clearPolling();
-				}
-			}, timeout);
+			if (timeout !== -1) {
+				timeoutId = setTimeout(function () {
+					if (!awaken) {
+						awaken = true;
+						wakeUp(0);
+						clearPolling();
+					}
+				}, timeout);
+			}
 		});
 	},
 

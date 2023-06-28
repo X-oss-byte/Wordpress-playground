@@ -1,6 +1,44 @@
 const dependencyFilename = __dirname + '/php_7_4.wasm'; 
  export { dependencyFilename }; 
-export const dependenciesTotalSize = 11020898; 
+export const dependenciesTotalSize = 11021839; 
+
+class EventEmitter {
+    constructor() {
+      this.listeners = {};
+    }
+  
+    on(eventName, listener) {
+      if (!this.listeners[eventName]) {
+        this.listeners[eventName] = [];
+      }
+      this.listeners[eventName].push(listener);
+    }
+  
+    once(eventName, listener) {
+      const onceWrapper = () => {
+        listener();
+        this.removeListener(eventName, onceWrapper);
+      };
+      this.on(eventName, onceWrapper);
+    }
+  
+    removeListener(eventName, listenerToRemove) {
+      if (!this.listeners[eventName]) {
+        return;
+      }
+      this.listeners[eventName] = this.listeners[eventName].filter(
+        (listener) => listener !== listenerToRemove
+      );
+    }
+  
+    emit(eventName) {
+      if (!this.listeners[eventName]) {
+        return;
+      }
+      this.listeners[eventName].forEach((listener) => listener());
+    }
+}
+  
 export function init(RuntimeName, PHPLoader) {
     /**
      * Overrides Emscripten's default ExitStatus object which gets
@@ -5518,18 +5556,17 @@ function _js_create_input_device(procopenCallId) {
  let dataBuffer = [];
  let dataCallback;
  const filename = "proc_id_" + procopenCallId;
-    const device = FS.createDevice("/dev", filename, function () {
- }, function (byte) {
-     try {
-         dataBuffer.push(byte);
-         if (dataCallback) {
-             dataCallback(new Uint8Array(dataBuffer));
-             dataBuffer = [];
-         }
-     } catch (e) {
-         console.error(e);
-         throw e;
-     }
+ const device = FS.createDevice("/dev", filename, function() {}, function(byte) {
+  try {
+   dataBuffer.push(byte);
+   if (dataCallback) {
+    dataCallback(new Uint8Array(dataBuffer));
+    dataBuffer = [];
+   }
+  } catch (e) {
+   console.error(e);
+   throw e;
+  }
  });
  const devicePath = "/dev/" + filename;
  PHPWASM.callback_pipes[procopenCallId] = {
@@ -5553,54 +5590,47 @@ function _js_module_onMessage(data) {
 }
 
 function _js_open_process(command, procopenCallId, stdoutFd, stderrFd) {
- if (!command) return 1;
- const cmdstr = UTF8ToString(command);
- if (!cmdstr.length) return 0;
- const cp = require("child_process").spawn(cmdstr, [], {
-     shell: true,
-     stdio: ["pipe", "pipe", "pipe"],
-     timeout: 100
- });
- // log on cp close
- cp.on('error', (code) => {
-     console.log(`child process errored with code ${code}`);
- });
- cp.on('close', (code) => {
-     console.log(`child process closed with code ${code}`);
- });
- cp.on('exit', (code) => {
-     console.log(`child process exited with code ${code}`);
- });
-    
- // This doesn't seem to work:
- cp.stdin.setEncoding('utf-8');
+    if (!PHPWASM.proc_fds) {
+        PHPWASM.proc_fds = {};
+    }
+    if (!command) return 1;
 
- if (PHPWASM.callback_pipes && procopenCallId in PHPWASM.callback_pipes) {
-    PHPWASM.callback_pipes[procopenCallId].onData(function (data) {
-        console.log('writing data to stdin', { data })
-        if (!data) return;
-        const dataStr = new TextDecoder("utf-8").decode(data);
-        console.log({ dataStr });
-        cp.stdin.write(dataStr);
+    const cmdstr = UTF8ToString(command);
+    if (!cmdstr.length) return 0;
+
+    const cp = require("child_process").spawn(cmdstr, [], {
+        shell: true,
+        stdio: [ "pipe", "pipe", "pipe" ],
     });
- }
- const stdoutStream = SYSCALLS.getStreamFromFD(stdoutFd);
- const stderrStream = SYSCALLS.getStreamFromFD(stderrFd);
- cp.stdout.on("data", function(data) {
-  stdoutStream.stream_ops.write(stdoutStream, data, 0, data.length, 0);
- });
- cp.stderr.on("data", function(data) {
-  stderrStream.stream_ops.write(stderrStream, data, 0, data.length, 0);
- });
- return Asyncify.handleSleep(wakeUp => {
-     // setTimeout is needed because otherwise
-     // we'll finish synchronously and JS will
-     // not get a chance to write the data to
-     // the stdout stream
-     setTimeout(() => {
-        wakeUp();
-     }, 10);
- });
+
+    // -1 is an extremely naive way of computing parentend
+    // @TODO pass this in from PHP
+    const stdoutStream = SYSCALLS.getStreamFromFD(stdoutFd);
+    cp.on("exit", function (data) {
+        PHPWASM.proc_fds[stdoutFd - 1].exited = true;
+        PHPWASM.proc_fds[stdoutFd - 1].emit("data");
+        PHPWASM.proc_fds[stderrFd - 1].exited = true;
+        PHPWASM.proc_fds[stderrFd - 1].emit("data");
+    });
+    PHPWASM.proc_fds[stdoutFd - 1] = new EventEmitter();
+    PHPWASM.proc_fds[stderrFd - 1] = new EventEmitter();
+
+    cp.stdout.on("data", function (data) {
+        console.log("Writing data", data.toString());
+        PHPWASM.proc_fds[stdoutFd - 1].hasData = true;
+        PHPWASM.proc_fds[stdoutFd - 1].emit("data");
+        stdoutStream.stream_ops.write(stdoutStream, data, 0, data.length, 0);
+    });
+
+    // -1 is an extremely naive way of computing parentend
+    // @TODO pass this in from PHP
+    const stderrStream = SYSCALLS.getStreamFromFD(stderrFd);
+    cp.stderr.on("data", function(data) {
+        console.log("Writing error", data.toString());
+        PHPWASM.proc_fds[stderrFd - 1].hasData = true;
+        PHPWASM.proc_fds[stderrFd - 1].emit("data");
+        stderrStream.stream_ops.write(stderrStream, data, 0, data.length, 0);
+    });
 }
 
 function _js_popen_to_file(command, mode, exitCodePtr) {
@@ -6126,49 +6156,60 @@ function _wasm_poll_socket(socketd, events, timeout) {
  const POLLHUP = 16;
  const POLLNVAL = 32;
  return Asyncify.handleSleep(wakeUp => {
-  const sock = getSocketFromFD(socketd);
-  if (!sock) {
-   wakeUp(0);
-   return;
-  }
-  const polls = [];
-  const lookingFor = new Set();
-  if (events & POLLIN || events & POLLPRI) {
-   if (sock.server) {
-    for (const client of sock.pending) {
-     if ((client.recv_queue || []).length > 0) {
-      wakeUp(1);
-      return;
+     const polls = [];
+     if (PHPWASM.proc_fds && socketd in PHPWASM.proc_fds) {
+         const emitter = PHPWASM.proc_fds[socketd];
+         if (emitter.exited) {
+             wakeUp(0);
+             return;
+         }
+         polls.push(
+             PHPWASM.awaitWsEvent(emitter, 'data')
+         );
+     } else {
+         const sock = getSocketFromFD(socketd);
+         if (!sock) {
+             wakeUp(0);
+             return;
+         }
+         const lookingFor = new Set();
+         if (events & POLLIN || events & POLLPRI) {
+             if (sock.server) {
+                 for (const client of sock.pending) {
+                     if ((client.recv_queue || []).length > 0) {
+                         wakeUp(1);
+                         return;
+                     }
+                 }
+             } else if ((sock.recv_queue || []).length > 0) {
+                 wakeUp(1);
+                 return;
+             }
+         }
+         const webSockets = PHPWASM.getAllWebSockets(sock);
+         if (!webSockets.length) {
+             wakeUp(0);
+             return;
+         }
+         for (const ws of webSockets) {
+             if (events & POLLIN || events & POLLPRI) {
+                 polls.push(PHPWASM.awaitData(ws));
+                 lookingFor.add("POLLIN");
+             }
+             if (events & POLLOUT) {
+                 polls.push(PHPWASM.awaitConnection(ws));
+                 lookingFor.add("POLLOUT");
+             }
+             if (events & POLLHUP) {
+                 polls.push(PHPWASM.awaitClose(ws));
+                 lookingFor.add("POLLHUP");
+             }
+             if (events & POLLERR || events & POLLNVAL) {
+                 polls.push(PHPWASM.awaitError(ws));
+                 lookingFor.add("POLLERR");
+             }
+         }
      }
-    }
-   } else if ((sock.recv_queue || []).length > 0) {
-    wakeUp(1);
-    return;
-   }
-  }
-  const webSockets = PHPWASM.getAllWebSockets(sock);
-  if (!webSockets.length) {
-   wakeUp(0);
-   return;
-  }
-  for (const ws of webSockets) {
-   if (events & POLLIN || events & POLLPRI) {
-    polls.push(PHPWASM.awaitData(ws));
-    lookingFor.add("POLLIN");
-   }
-   if (events & POLLOUT) {
-    polls.push(PHPWASM.awaitConnection(ws));
-    lookingFor.add("POLLOUT");
-   }
-   if (events & POLLHUP) {
-    polls.push(PHPWASM.awaitClose(ws));
-    lookingFor.add("POLLHUP");
-   }
-   if (events & POLLERR || events & POLLNVAL) {
-    polls.push(PHPWASM.awaitError(ws));
-    lookingFor.add("POLLERR");
-   }
-  }
   if (polls.length === 0) {
    console.warn("Unsupported poll event " + events + ", defaulting to setTimeout().");
    setTimeout(function() {
@@ -6178,22 +6219,27 @@ function _wasm_poll_socket(socketd, events, timeout) {
   }
   const promises = polls.map(([promise]) => promise);
   const clearPolling = () => polls.forEach(([, clear]) => clear());
-  let awaken = false;
+     let awaken = false;
+     let timeoutId;
   Promise.race(promises).then(function(results) {
    if (!awaken) {
     awaken = true;
     wakeUp(1);
-    clearTimeout(timeoutId);
+       if (timeout !== -1) {
+           clearTimeout(timeoutId);
+       }
     clearPolling();
    }
   });
-  const timeoutId = setTimeout(function() {
-   if (!awaken) {
-    awaken = true;
-    wakeUp(0);
-    clearPolling();
-   }
-  }, timeout);
+     if (timeout !== -1) {
+         timeoutId = setTimeout(function () {
+             if (!awaken) {
+                 awaken = true;
+                 wakeUp(0);
+                 clearPolling();
+             }
+         }, timeout);
+     }
  });
 }
 
@@ -6786,16 +6832,16 @@ var _wasm_popen = Module["_wasm_popen"] = function() {
  return (_wasm_popen = Module["_wasm_popen"] = Module["asm"]["eb"]).apply(null, arguments);
 };
 
+var _php_pollfd_for = Module["_php_pollfd_for"] = function() {
+ return (_php_pollfd_for = Module["_php_pollfd_for"] = Module["asm"]["fb"]).apply(null, arguments);
+};
+
 var _wasm_pclose = Module["_wasm_pclose"] = function() {
- return (_wasm_pclose = Module["_wasm_pclose"] = Module["asm"]["fb"]).apply(null, arguments);
+ return (_wasm_pclose = Module["_wasm_pclose"] = Module["asm"]["gb"]).apply(null, arguments);
 };
 
 var _fflush = Module["_fflush"] = function() {
- return (_fflush = Module["_fflush"] = Module["asm"]["gb"]).apply(null, arguments);
-};
-
-var _php_pollfd_for = Module["_php_pollfd_for"] = function() {
- return (_php_pollfd_for = Module["_php_pollfd_for"] = Module["asm"]["hb"]).apply(null, arguments);
+ return (_fflush = Module["_fflush"] = Module["asm"]["hb"]).apply(null, arguments);
 };
 
 var _htons = Module["_htons"] = function() {

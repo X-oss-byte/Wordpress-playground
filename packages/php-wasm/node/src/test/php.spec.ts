@@ -16,7 +16,7 @@ describe.each(['7.4'])('PHP %s', (phpVersion) => {
 		php = await NodePHP.load(phpVersion);
 	});
 
-	it('proc_open() test with files', async () => {
+	it.only('proc_open() test with files', async () => {
 		php.setPhpIniEntry('disable_functions', '');
 		const result = await php.run({
 			code: `<?php
@@ -56,6 +56,8 @@ describe.each(['7.4'])('PHP %s', (phpVersion) => {
 				$pipes
 			);
 
+			// var_dump($pipes);
+			// die();
 			$stdout = stream_get_contents($pipes[1]);
 			$stderr = stream_get_contents($pipes[2]);
 			proc_close($res);
