@@ -932,6 +932,7 @@ RUN source /root/emsdk/emsdk_env.sh && \
 "_phpwasm_destroy_uploaded_files_hash", \n\
 "_phpwasm_init_uploaded_files_hash", \n\
 "_phpwasm_register_uploaded_file", \n\
+"_wasm_sleep", \n\
 "_wasm_set_phpini_path", \n\
 "_wasm_set_phpini_entries", \n\
 "_wasm_add_SERVER_entry", \n\

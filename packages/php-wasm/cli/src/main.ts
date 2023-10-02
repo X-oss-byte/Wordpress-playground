@@ -50,12 +50,28 @@ php.setSpawnHandler((command: string) => {
 	// Naively replace the PHP binary with the PHP-WASM command
 	// @TODO: Don't process the command. Lean on the shell to do it, e.g. through
 	//        a PATH or an alias.
-	command = command.replace(/^(?:\\ |[^ ])*php\d?/, phpWasmCommand);
+	const updatedCommand = command.replace(
+		/^(?:\\ |[^ ])*php\d?(\s|$)/,
+		phpWasmCommand
+	);
+	console.log({
+		phpWasmCommand,
+		command,
+		updatedCommand,
+		script: `#!/bin/sh
+	${updatedCommand} < /dev/stdin
+	`,
+	});
 
 	// Create a shell script in a temporary directory
 	const tempDir = mkdtempSync('php-wasm-');
 	const tempScriptPath = `${tempDir}/script.sh`;
-	writeFileSync(tempScriptPath, `#!/bin/sh\n${command}\n`);
+	writeFileSync(
+		tempScriptPath,
+		`#!/bin/sh
+	${updatedCommand} < /dev/stdin
+	`
+	);
 
 	return spawn('sh', [tempScriptPath], {
 		shell: true,
