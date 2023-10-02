@@ -200,7 +200,10 @@ const LibraryExample = {
 		return allocateUTF8OnStack(devicePath);
 	},
 
-	js_open_process: function(command, procopenCallId, stdoutFd, stderrFd) {
+	js_open_process: function (command, procopenCallId, stdoutFd, stderrFd) {
+	    if (!PHPWASM.proc_fds) {
+			PHPWASM.proc_fds = {};
+		}
 		if (!command) return 1;
 		const cmdstr = UTF8ToString(command);
 		if (!cmdstr.length) return 0;
@@ -212,14 +215,17 @@ const LibraryExample = {
 	   
 		if (PHPWASM.callback_pipes && procopenCallId in PHPWASM.callback_pipes) {
 		   PHPWASM.callback_pipes[procopenCallId].onData(function (data) {
-			   console.log('writing data to stdin', { data })
-			   if (!data) return;
-			   const dataStr = new TextDecoder("utf-8").decode(data);
-			   console.log({ dataStr });
-			   cp.stdin.write(dataStr);
+				// console.log('writing data to stdin', { data })
+				if (!data) return;
+				const dataStr = new TextDecoder("utf-8").decode(data);
+				// console.log({ dataStr });
+				cp.stdin.write(dataStr);
 		   });
+		} else {
+			const stdinStream = SYSCALLS.getStreamFromFD(procopenCallId);
+			console.log({stdinStream})
 		}
-		
+
 		// -1 is an extremely naive way of computing parentend
 		// @TODO pass this in from PHP
 		const stdoutStream = SYSCALLS.getStreamFromFD(stdoutFd);
@@ -229,11 +235,13 @@ const LibraryExample = {
 			PHPWASM.proc_fds[stderrFd - 1].exited = true;
 			PHPWASM.proc_fds[stderrFd - 1].emit("data");
 		});
+		// @TODO Node.js specific:
+		const EventEmitter = require('events');
 		PHPWASM.proc_fds[stdoutFd - 1] = new EventEmitter();
 		PHPWASM.proc_fds[stderrFd - 1] = new EventEmitter();
 	
 		cp.stdout.on("data", function (data) {
-			console.log("Writing data", data.toString());
+			// console.log("Writing data", data.toString());
 			PHPWASM.proc_fds[stdoutFd - 1].hasData = true;
 			PHPWASM.proc_fds[stdoutFd - 1].emit("data");
 			stdoutStream.stream_ops.write(stdoutStream, data, 0, data.length, 0);
@@ -248,6 +256,23 @@ const LibraryExample = {
 			PHPWASM.proc_fds[stderrFd - 1].emit("data");
 			stderrStream.stream_ops.write(stderrStream, data, 0, data.length, 0);
 		});
+    
+		// Handle stdin descriptor
+		// If it's a "pipe", it is listed in `callback_pipes` by now.
+		// Let's listen to anything it outputs and pass it to the child process.
+		if (PHPWASM.callback_pipes && procopenCallId in PHPWASM.callback_pipes) {
+		   PHPWASM.callback_pipes[procopenCallId].onData(function(data) {
+			if (!data) return;
+			const dataStr = new TextDecoder("utf-8").decode(data);
+			cp.stdin.write(dataStr);
+		   });
+		} else {
+		   // Otherwise, it's a file descriptor.
+		   // Let's pass the already read contents to the child process.
+		   const stdinStream = SYSCALLS.getStreamFromFD(procopenCallId);
+		   const dataStr = new TextDecoder("utf-8").decode(stdinStream.node.contents);
+		   cp.stdin.write(dataStr);
+		 }
 	},
 
 	/**

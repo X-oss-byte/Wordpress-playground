@@ -1,44 +1,6 @@
 const dependencyFilename = __dirname + '/php_7_4.wasm'; 
  export { dependencyFilename }; 
-export const dependenciesTotalSize = 11021839; 
-
-class EventEmitter {
-    constructor() {
-      this.listeners = {};
-    }
-  
-    on(eventName, listener) {
-      if (!this.listeners[eventName]) {
-        this.listeners[eventName] = [];
-      }
-      this.listeners[eventName].push(listener);
-    }
-  
-    once(eventName, listener) {
-      const onceWrapper = () => {
-        listener();
-        this.removeListener(eventName, onceWrapper);
-      };
-      this.on(eventName, onceWrapper);
-    }
-  
-    removeListener(eventName, listenerToRemove) {
-      if (!this.listeners[eventName]) {
-        return;
-      }
-      this.listeners[eventName] = this.listeners[eventName].filter(
-        (listener) => listener !== listenerToRemove
-      );
-    }
-  
-    emit(eventName) {
-      if (!this.listeners[eventName]) {
-        return;
-      }
-      this.listeners[eventName].forEach((listener) => listener());
-    }
-}
-  
+export const dependenciesTotalSize = 11021724; 
 export function init(RuntimeName, PHPLoader) {
     /**
      * Overrides Emscripten's default ExitStatus object which gets
@@ -5568,7 +5530,7 @@ function _js_create_input_device(procopenCallId) {
    throw e;
   }
  });
- const devicePath = "/dev/" + filename;
+    const devicePath = "/dev/" + filename;
  PHPWASM.callback_pipes[procopenCallId] = {
   devicePath: devicePath,
   onData: function(cb) {
@@ -5590,47 +5552,59 @@ function _js_module_onMessage(data) {
 }
 
 function _js_open_process(command, procopenCallId, stdoutFd, stderrFd) {
-    if (!PHPWASM.proc_fds) {
-        PHPWASM.proc_fds = {};
-    }
-    if (!command) return 1;
-
-    const cmdstr = UTF8ToString(command);
-    if (!cmdstr.length) return 0;
-
-    const cp = require("child_process").spawn(cmdstr, [], {
-        shell: true,
-        stdio: [ "pipe", "pipe", "pipe" ],
+ if (!PHPWASM.proc_fds) {
+  PHPWASM.proc_fds = {};
+ }
+ if (!command) return 1;
+ const cmdstr = UTF8ToString(command);
+ if (!cmdstr.length) return 0;
+ const cp = require("child_process").spawn(cmdstr, [], {
+  shell: true,
+  stdio: [ "pipe", "pipe", "pipe" ],
+  timeout: 100
+ });
+    
+ const stdoutStream = SYSCALLS.getStreamFromFD(stdoutFd);
+ cp.on("exit", function(data) {
+  PHPWASM.proc_fds[stdoutFd - 1].exited = true;
+  PHPWASM.proc_fds[stdoutFd - 1].emit("data");
+  PHPWASM.proc_fds[stderrFd - 1].exited = true;
+  PHPWASM.proc_fds[stderrFd - 1].emit("data");
+ });
+ const EventEmitter = require("events");
+ PHPWASM.proc_fds[stdoutFd - 1] = new EventEmitter();
+ PHPWASM.proc_fds[stderrFd - 1] = new EventEmitter();
+ cp.stdout.on("data", function(data) {
+  PHPWASM.proc_fds[stdoutFd - 1].hasData = true;
+  PHPWASM.proc_fds[stdoutFd - 1].emit("data");
+  stdoutStream.stream_ops.write(stdoutStream, data, 0, data.length, 0);
+ });
+ const stderrStream = SYSCALLS.getStreamFromFD(stderrFd);
+ cp.stderr.on("data", function(data) {
+  console.log("Writing error", data.toString());
+  PHPWASM.proc_fds[stderrFd - 1].hasData = true;
+  PHPWASM.proc_fds[stderrFd - 1].emit("data");
+  stderrStream.stream_ops.write(stderrStream, data, 0, data.length, 0);
+ });
+    
+ // Handle stdin descriptor
+ // If it's a "pipe", it is listed in `callback_pipes` by now.
+ // Let's listen to anything it outputs and pass it to the child process.
+ if (PHPWASM.callback_pipes && procopenCallId in PHPWASM.callback_pipes) {
+    PHPWASM.callback_pipes[procopenCallId].onData(function(data) {
+     if (!data) return;
+     const dataStr = new TextDecoder("utf-8").decode(data);
+     cp.stdin.write(dataStr);
     });
-
-    // -1 is an extremely naive way of computing parentend
-    // @TODO pass this in from PHP
-    const stdoutStream = SYSCALLS.getStreamFromFD(stdoutFd);
-    cp.on("exit", function (data) {
-        PHPWASM.proc_fds[stdoutFd - 1].exited = true;
-        PHPWASM.proc_fds[stdoutFd - 1].emit("data");
-        PHPWASM.proc_fds[stderrFd - 1].exited = true;
-        PHPWASM.proc_fds[stderrFd - 1].emit("data");
-    });
-    PHPWASM.proc_fds[stdoutFd - 1] = new EventEmitter();
-    PHPWASM.proc_fds[stderrFd - 1] = new EventEmitter();
-
-    cp.stdout.on("data", function (data) {
-        console.log("Writing data", data.toString());
-        PHPWASM.proc_fds[stdoutFd - 1].hasData = true;
-        PHPWASM.proc_fds[stdoutFd - 1].emit("data");
-        stdoutStream.stream_ops.write(stdoutStream, data, 0, data.length, 0);
-    });
-
-    // -1 is an extremely naive way of computing parentend
-    // @TODO pass this in from PHP
-    const stderrStream = SYSCALLS.getStreamFromFD(stderrFd);
-    cp.stderr.on("data", function(data) {
-        console.log("Writing error", data.toString());
-        PHPWASM.proc_fds[stderrFd - 1].hasData = true;
-        PHPWASM.proc_fds[stderrFd - 1].emit("data");
-        stderrStream.stream_ops.write(stderrStream, data, 0, data.length, 0);
-    });
+ } else {
+    // Otherwise, it's a file descriptor.
+    // Let's pass the already read contents to the child process.
+    const stdinStream = SYSCALLS.getStreamFromFD(procopenCallId);
+    const dataStr = new TextDecoder("utf-8").decode(stdinStream.node.contents);
+    cp.stdin.write(dataStr);
+  }
+      
+  
 }
 
 function _js_popen_to_file(command, mode, exitCodePtr) {
@@ -6156,60 +6130,58 @@ function _wasm_poll_socket(socketd, events, timeout) {
  const POLLHUP = 16;
  const POLLNVAL = 32;
  return Asyncify.handleSleep(wakeUp => {
-     const polls = [];
-     if (PHPWASM.proc_fds && socketd in PHPWASM.proc_fds) {
-         const emitter = PHPWASM.proc_fds[socketd];
-         if (emitter.exited) {
-             wakeUp(0);
-             return;
-         }
-         polls.push(
-             PHPWASM.awaitWsEvent(emitter, 'data')
-         );
-     } else {
-         const sock = getSocketFromFD(socketd);
-         if (!sock) {
-             wakeUp(0);
-             return;
-         }
-         const lookingFor = new Set();
-         if (events & POLLIN || events & POLLPRI) {
-             if (sock.server) {
-                 for (const client of sock.pending) {
-                     if ((client.recv_queue || []).length > 0) {
-                         wakeUp(1);
-                         return;
-                     }
-                 }
-             } else if ((sock.recv_queue || []).length > 0) {
-                 wakeUp(1);
-                 return;
-             }
-         }
-         const webSockets = PHPWASM.getAllWebSockets(sock);
-         if (!webSockets.length) {
-             wakeUp(0);
-             return;
-         }
-         for (const ws of webSockets) {
-             if (events & POLLIN || events & POLLPRI) {
-                 polls.push(PHPWASM.awaitData(ws));
-                 lookingFor.add("POLLIN");
-             }
-             if (events & POLLOUT) {
-                 polls.push(PHPWASM.awaitConnection(ws));
-                 lookingFor.add("POLLOUT");
-             }
-             if (events & POLLHUP) {
-                 polls.push(PHPWASM.awaitClose(ws));
-                 lookingFor.add("POLLHUP");
-             }
-             if (events & POLLERR || events & POLLNVAL) {
-                 polls.push(PHPWASM.awaitError(ws));
-                 lookingFor.add("POLLERR");
-             }
-         }
+  const polls = [];
+  if (PHPWASM.proc_fds && socketd in PHPWASM.proc_fds) {
+   const emitter = PHPWASM.proc_fds[socketd];
+   if (emitter.exited) {
+    wakeUp(0);
+    return;
+   }
+   polls.push(PHPWASM.awaitWsEvent(emitter, "data"));
+  } else {
+   const sock = getSocketFromFD(socketd);
+   if (!sock) {
+    wakeUp(0);
+    return;
+   }
+   const lookingFor = new Set();
+   if (events & POLLIN || events & POLLPRI) {
+    if (sock.server) {
+     for (const client of sock.pending) {
+      if ((client.recv_queue || []).length > 0) {
+       wakeUp(1);
+       return;
+      }
      }
+    } else if ((sock.recv_queue || []).length > 0) {
+     wakeUp(1);
+     return;
+    }
+   }
+   const webSockets = PHPWASM.getAllWebSockets(sock);
+   if (!webSockets.length) {
+    wakeUp(0);
+    return;
+   }
+   for (const ws of webSockets) {
+    if (events & POLLIN || events & POLLPRI) {
+     polls.push(PHPWASM.awaitData(ws));
+     lookingFor.add("POLLIN");
+    }
+    if (events & POLLOUT) {
+     polls.push(PHPWASM.awaitConnection(ws));
+     lookingFor.add("POLLOUT");
+    }
+    if (events & POLLHUP) {
+     polls.push(PHPWASM.awaitClose(ws));
+     lookingFor.add("POLLHUP");
+    }
+    if (events & POLLERR || events & POLLNVAL) {
+     polls.push(PHPWASM.awaitError(ws));
+     lookingFor.add("POLLERR");
+    }
+   }
+  }
   if (polls.length === 0) {
    console.warn("Unsupported poll event " + events + ", defaulting to setTimeout().");
    setTimeout(function() {
@@ -6219,27 +6191,27 @@ function _wasm_poll_socket(socketd, events, timeout) {
   }
   const promises = polls.map(([promise]) => promise);
   const clearPolling = () => polls.forEach(([, clear]) => clear());
-     let awaken = false;
-     let timeoutId;
+  let awaken = false;
+  let timeoutId;
   Promise.race(promises).then(function(results) {
    if (!awaken) {
     awaken = true;
     wakeUp(1);
-       if (timeout !== -1) {
-           clearTimeout(timeoutId);
-       }
+    if (timeoutId) {
+     clearTimeout(timeoutId);
+    }
     clearPolling();
    }
   });
-     if (timeout !== -1) {
-         timeoutId = setTimeout(function () {
-             if (!awaken) {
-                 awaken = true;
-                 wakeUp(0);
-                 clearPolling();
-             }
-         }, timeout);
-     }
+  if (timeout !== -1) {
+   timeoutId = setTimeout(function() {
+    if (!awaken) {
+     awaken = true;
+     wakeUp(0);
+     clearPolling();
+    }
+   }, timeout);
+  }
  });
 }
 
@@ -6705,25 +6677,25 @@ var asmLibraryArg = {
  "Wa": ___syscall_accept4,
  "Va": ___syscall_bind,
  "Ua": ___syscall_chdir,
- "P": ___syscall_chmod,
+ "Q": ___syscall_chmod,
  "Ta": ___syscall_connect,
  "Sa": ___syscall_dup,
  "Ra": ___syscall_dup3,
  "Qa": ___syscall_faccessat,
- "U": ___syscall_fallocate,
+ "V": ___syscall_fallocate,
  "Pa": ___syscall_fchmod,
  "Oa": ___syscall_fchown32,
- "O": ___syscall_fchownat,
+ "P": ___syscall_fchownat,
  "o": ___syscall_fcntl64,
  "Na": ___syscall_fdatasync,
  "Ma": ___syscall_fstat64,
- "T": ___syscall_ftruncate64,
+ "U": ___syscall_ftruncate64,
  "La": ___syscall_getcwd,
  "Ka": ___syscall_getdents64,
  "Ja": ___syscall_getpeername,
  "Ia": ___syscall_getsockname,
  "Ha": ___syscall_getsockopt,
- "N": ___syscall_ioctl,
+ "O": ___syscall_ioctl,
  "Ga": ___syscall_listen,
  "Fa": ___syscall_lstat64,
  "Ea": ___syscall_mkdirat,
@@ -6734,9 +6706,9 @@ var asmLibraryArg = {
  "Aa": ___syscall_readlinkat,
  "za": ___syscall_recvfrom,
  "ya": ___syscall_renameat,
- "M": ___syscall_rmdir,
+ "N": ___syscall_rmdir,
  "xa": ___syscall_sendto,
- "L": ___syscall_socket,
+ "M": ___syscall_socket,
  "wa": ___syscall_stat64,
  "va": ___syscall_statfs64,
  "ua": ___syscall_symlink,
@@ -6759,22 +6731,22 @@ var asmLibraryArg = {
  "A": _emscripten_get_now,
  "da": _emscripten_memcpy_big,
  "ca": _emscripten_resize_heap,
- "ba": _emscripten_sleep,
+ "J": _emscripten_sleep,
  "sa": _environ_get,
  "ra": _environ_sizes_get,
  "p": _exit,
  "r": _fd_close,
- "K": _fd_fdstat_get,
- "J": _fd_read,
- "S": _fd_seek,
+ "L": _fd_fdstat_get,
+ "K": _fd_read,
+ "T": _fd_seek,
  "C": _fd_write,
- "aa": _getaddrinfo,
+ "ba": _getaddrinfo,
  "I": _gethostbyaddr,
  "H": _gethostbyname_r,
- "$": _getloadavg,
+ "aa": _getloadavg,
  "G": _getnameinfo,
- "_": _getprotobyname,
- "Z": _getprotobynumber,
+ "$": _getprotobyname,
+ "_": _getprotobynumber,
  "h": invoke_i,
  "d": invoke_ii,
  "b": invoke_iii,
@@ -6793,17 +6765,17 @@ var asmLibraryArg = {
  "n": invoke_viiiii,
  "i": invoke_viiiiii,
  "y": invoke_viiiiiiiii,
- "Y": _js_create_input_device,
- "X": _js_module_onMessage,
- "W": _js_open_process,
- "V": _js_popen_to_file,
+ "Z": _js_create_input_device,
+ "Y": _js_module_onMessage,
+ "X": _js_open_process,
+ "W": _js_popen_to_file,
  "qa": _proc_exit,
  "E": _strftime,
- "R": _strptime,
+ "S": _strptime,
  "s": _wasm_close,
  "x": _wasm_poll_socket,
  "q": _wasm_setsockopt,
- "Q": _wasm_shutdown
+ "R": _wasm_shutdown
 };
 
 var asm = createWasm();

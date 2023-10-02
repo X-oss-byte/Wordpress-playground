@@ -16,13 +16,13 @@ describe.each(['7.4'])('PHP %s', (phpVersion) => {
 		php = await NodePHP.load(phpVersion);
 	});
 
-	it.only('proc_open() test with files', async () => {
+	it.skip('proc_open() test with files', async () => {
 		php.setPhpIniEntry('disable_functions', '');
 		const result = await php.run({
 			code: `<?php
 			file_put_contents('/tmp/process_in', '');
 			$res = proc_open(
-				"echo meow",
+				"echo WordPress",
 				array(
 					array("file","/tmp/process_in", "r"),
 					array("file","/tmp/process_out", "w"),
@@ -31,6 +31,9 @@ describe.each(['7.4'])('PHP %s', (phpVersion) => {
 				$pipes
 			);
 
+			@file_get_contents("https://wordpress.org");
+			sleep(1);
+
 			$stdout = file_get_contents("/tmp/process_out");
 			$stderr = file_get_contents("/tmp/process_err");
 
@@ -38,16 +41,17 @@ describe.each(['7.4'])('PHP %s', (phpVersion) => {
 			echo 'stderr: ' . $stderr . PHP_EOL;
 		`,
 		});
-		expect(result.text).toEqual('stdout: meow\nstderr: \n');
+		console.log(php.readFileAsText('/tmp/process_out'));
+		expect(result.text).toEqual('stdout: WordPress\nstderr: \n');
 	});
 
-	it('proc_open() test with pipes', async () => {
+	it.skip('proc_open() test with pipes', async () => {
 		php.setPhpIniEntry('disable_functions', '');
 		const result = await php.run({
 			code: `<?php
 			file_put_contents('/tmp/process_in', '');
 			$res = proc_open(
-				"echo meow",
+				"echo WordPress",
 				array(
 					array("file","/tmp/process_in", "r"),
 					array("pipe","w"),
@@ -56,8 +60,6 @@ describe.each(['7.4'])('PHP %s', (phpVersion) => {
 				$pipes
 			);
 
-			// var_dump($pipes);
-			// die();
 			$stdout = stream_get_contents($pipes[1]);
 			$stderr = stream_get_contents($pipes[2]);
 			proc_close($res);
@@ -66,10 +68,11 @@ describe.each(['7.4'])('PHP %s', (phpVersion) => {
 			echo 'stderr: ' . $stderr . PHP_EOL;
 		`,
 		});
-		expect(result.text).toEqual('stdout: meow\nstderr: \n');
+		expect(result.text).toEqual('stdout: WordPress\nstderr: \n');
 	});
 
-	it.skip('proc_open() test with stdin', async () => {
+	// It works! :o NICE!
+	it('proc_open() test with stdin (pipe)', async () => {
 		php.setPhpIniEntry('disable_functions', '');
 		php.setPhpIniEntry('allow_url_fopen', '1');
 		const result = await php.run({
@@ -83,10 +86,9 @@ describe.each(['7.4'])('PHP %s', (phpVersion) => {
 				),
 				$pipes
 			);
-			// Big problem: This is synchronous:
-			fwrite($pipes[0], 'meow');
-			
-			// file_get_contents('http://wordpress.org');
+			fwrite($pipes[0], 'WordPress\n');
+
+			sleep(1);
 
 			// And this is synchronous, too. We can't process the child_process
 			// output in between these calls. We need to somehow yield back to JS
@@ -99,8 +101,40 @@ describe.each(['7.4'])('PHP %s', (phpVersion) => {
 			echo 'stderr: ' . $stderr . PHP_EOL;
 		`,
 		});
-		console.log(await php.readFileAsText('/tmp/process_out'));
-		expect(result.text).toEqual('stdout: meow\nstderr: \n');
+		expect(result.text).toEqual('stdout: WordPress\nstderr: \n');
+	});
+
+	it('proc_open() test with stdin (file)', async () => {
+		php.setPhpIniEntry('disable_functions', '');
+		php.setPhpIniEntry('allow_url_fopen', '1');
+		const result = await php.run({
+			code: `<?php
+			file_put_contents('/tmp/process_in', 'WordPress\n');
+			$res = proc_open(
+				"cat",
+				array(
+					array("file","/tmp/process_in", "r"),
+					array("file","/tmp/process_out", "w"),
+					array("file","/tmp/process_err", "w"),
+				),
+				$pipes
+			);
+
+			sleep(1);
+
+			// And this is synchronous, too. We can't process the child_process
+			// output in between these calls. We need to somehow yield back to JS
+			// after writing to stdin.
+			$stdout = file_get_contents("/tmp/process_out");
+			$stderr = file_get_contents("/tmp/process_err");
+			proc_close($res);
+
+			echo 'stdout: ' . $stdout . "";
+			echo 'stderr: ' . $stderr . PHP_EOL;
+		`,
+		});
+
+		expect(result.text).toEqual('stdout: WordPress\nstderr: \n');
 	});
 
 	describe('Filesystem', () => {

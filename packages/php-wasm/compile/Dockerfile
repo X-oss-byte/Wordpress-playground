@@ -488,6 +488,9 @@ RUN source /root/emsdk/emsdk_env.sh && \
 RUN echo '#define ZEND_MM_ERROR 0' >> /root/php-src/main/php_config.h; 
 
 # With HAVE_UNISTD_H=1 PHP complains about the missing getdtablesize() function 
+RUN /root/replace.sh 's/define php_sleep sleep/define php_sleep wasm_sleep/g' /root/php-src/main/php.h
+RUN echo 'extern unsigned int wasm_sleep(unsigned int time);' >> /root/php-src/main/php.h; 
+
 RUN /root/replace.sh 's/define HAVE_UNISTD_H 1/define HAVE_UNISTD_H 0/g' /root/php-src/main/php_config.h
 RUN /root/replace.sh 's/\(proc_open\)/(php_proc_open)/g' /root/php-src/ext/standard/proc_open.c
 

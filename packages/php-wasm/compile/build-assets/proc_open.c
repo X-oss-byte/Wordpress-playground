@@ -611,7 +611,7 @@ PHP_FUNCTION(proc_open)
                 // the process.
                 if (descriptors[ndesc].index == 0) {
                     char *device_path = js_create_input_device(current_procopen_call_id);
-                    printf("ndesc: %d, index: %d, nindex: %u, device_path: %s\n", ndesc, descriptors[ndesc].index, nindex, device_path);
+                    // printf("ndesc: %d, index: %d, nindex: %u, device_path: %s\n", ndesc, descriptors[ndesc].index, nindex, device_path);
                     descriptors[ndesc].childend = current_procopen_call_id;
                     descriptors[ndesc].parentend = open(device_path, O_WRONLY);
                 } else {

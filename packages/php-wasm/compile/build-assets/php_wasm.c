@@ -36,6 +36,11 @@
 // The wasm_popen and wasm_pclose functions are called thanks
 // to -Dpopen=wasm_popen and -Dpclose=wasm_pclose in the Dockerfile.
 
+unsigned int wasm_sleep(unsigned int time) {
+	emscripten_sleep(time * 1000); // emscripten_sleep takes time in milliseconds
+	return time;
+}
+
 extern int *wasm_setsockopt(int sockfd, int level, int optname, intptr_t optval, size_t optlen, int dummy);
 extern char *js_popen_to_file(const char *cmd, const char *mode, uint8_t *exit_code_ptr);
 extern void *js_module_onMessage(const char *data);
