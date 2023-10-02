@@ -5530,6 +5530,7 @@ function _js_create_input_device(procopenCallId) {
    throw e;
   }
  });
+ 
     const devicePath = "/dev/" + filename;
  PHPWASM.callback_pipes[procopenCallId] = {
   devicePath: devicePath,
@@ -5588,21 +5589,23 @@ function _js_open_process(command, procopenCallId, stdoutFd, stderrFd) {
  });
     
  // Handle stdin descriptor
- // If it's a "pipe", it is listed in `callback_pipes` by now.
- // Let's listen to anything it outputs and pass it to the child process.
  if (PHPWASM.callback_pipes && procopenCallId in PHPWASM.callback_pipes) {
+    // It is a "pipe". By now it is listed in `callback_pipes`.
+    // Let's listen to anything it outputs and pass it to the child process.
     PHPWASM.callback_pipes[procopenCallId].onData(function(data) {
      if (!data) return;
      const dataStr = new TextDecoder("utf-8").decode(data);
      cp.stdin.write(dataStr);
     });
  } else {
-    // Otherwise, it's a file descriptor.
-    // Let's pass the already read contents to the child process.
     const stdinStream = SYSCALLS.getStreamFromFD(procopenCallId);
-    const dataStr = new TextDecoder("utf-8").decode(stdinStream.node.contents);
-    cp.stdin.write(dataStr);
-  }
+    if(stdinStream?.node?.contents) {
+        // It is a file descriptor.
+        // Let's pass the already read contents to the child process.
+        const dataStr = new TextDecoder("utf-8").decode(stdinStream.node.contents);
+        cp.stdin.write(dataStr);
+    }
+ }
       
   
 }

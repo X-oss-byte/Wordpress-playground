@@ -16,125 +16,128 @@ describe.each(['7.4'])('PHP %s', (phpVersion) => {
 		php = await NodePHP.load(phpVersion);
 	});
 
-	it.skip('proc_open() test with files', async () => {
-		php.setPhpIniEntry('disable_functions', '');
-		const result = await php.run({
-			code: `<?php
-			file_put_contents('/tmp/process_in', '');
-			$res = proc_open(
-				"echo WordPress",
-				array(
-					array("file","/tmp/process_in", "r"),
-					array("file","/tmp/process_out", "w"),
-					array("file","/tmp/process_err", "w"),
-				),
-				$pipes
-			);
+	describe('proc_open()', () => {
+		it('echo – stdin=file (empty), stdout=file, stderr=file', async () => {
+			php.setPhpIniEntry('disable_functions', '');
+			const result = await php.run({
+				code: `<?php
+				file_put_contents('/tmp/process_in', '');
+				$res = proc_open(
+					"echo WordPress",
+					array(
+						array("file","/tmp/process_in", "r"),
+						array("file","/tmp/process_out", "w"),
+						array("file","/tmp/process_err", "w"),
+					),
+					$pipes
+				);
 
-			@file_get_contents("https://wordpress.org");
-			sleep(1);
+				// Yields back to JS event loop to capture and process the 
+				// child_process output. This is fine. Regular PHP scripts
+				// typically wait for the child process to finish.
+				sleep(1);
 
-			$stdout = file_get_contents("/tmp/process_out");
-			$stderr = file_get_contents("/tmp/process_err");
+				$stdout = file_get_contents("/tmp/process_out");
+				$stderr = file_get_contents("/tmp/process_err");
 
-			echo 'stdout: ' . $stdout . "";
-			echo 'stderr: ' . $stderr . PHP_EOL;
-		`,
-		});
-		console.log(php.readFileAsText('/tmp/process_out'));
-		expect(result.text).toEqual('stdout: WordPress\nstderr: \n');
-	});
-
-	it.skip('proc_open() test with pipes', async () => {
-		php.setPhpIniEntry('disable_functions', '');
-		const result = await php.run({
-			code: `<?php
-			file_put_contents('/tmp/process_in', '');
-			$res = proc_open(
-				"echo WordPress",
-				array(
-					array("file","/tmp/process_in", "r"),
-					array("pipe","w"),
-					array("pipe","w"),
-				),
-				$pipes
-			);
-
-			$stdout = stream_get_contents($pipes[1]);
-			$stderr = stream_get_contents($pipes[2]);
-			proc_close($res);
-
-			echo 'stdout: ' . $stdout . "";
-			echo 'stderr: ' . $stderr . PHP_EOL;
-		`,
-		});
-		expect(result.text).toEqual('stdout: WordPress\nstderr: \n');
-	});
-
-	// It works! :o NICE!
-	it('proc_open() test with stdin (pipe)', async () => {
-		php.setPhpIniEntry('disable_functions', '');
-		php.setPhpIniEntry('allow_url_fopen', '1');
-		const result = await php.run({
-			code: `<?php
-			$res = proc_open(
-				"cat",
-				array(
-					array("pipe","r"),
-					array("file","/tmp/process_out", "w"),
-					array("file","/tmp/process_err", "w"),
-				),
-				$pipes
-			);
-			fwrite($pipes[0], 'WordPress\n');
-
-			sleep(1);
-
-			// And this is synchronous, too. We can't process the child_process
-			// output in between these calls. We need to somehow yield back to JS
-			// after writing to stdin.
-			$stdout = file_get_contents("/tmp/process_out");
-			$stderr = file_get_contents("/tmp/process_err");
-			proc_close($res);
-
-			echo 'stdout: ' . $stdout . "";
-			echo 'stderr: ' . $stderr . PHP_EOL;
-		`,
-		});
-		expect(result.text).toEqual('stdout: WordPress\nstderr: \n');
-	});
-
-	it('proc_open() test with stdin (file)', async () => {
-		php.setPhpIniEntry('disable_functions', '');
-		php.setPhpIniEntry('allow_url_fopen', '1');
-		const result = await php.run({
-			code: `<?php
-			file_put_contents('/tmp/process_in', 'WordPress\n');
-			$res = proc_open(
-				"cat",
-				array(
-					array("file","/tmp/process_in", "r"),
-					array("file","/tmp/process_out", "w"),
-					array("file","/tmp/process_err", "w"),
-				),
-				$pipes
-			);
-
-			sleep(1);
-
-			// And this is synchronous, too. We can't process the child_process
-			// output in between these calls. We need to somehow yield back to JS
-			// after writing to stdin.
-			$stdout = file_get_contents("/tmp/process_out");
-			$stderr = file_get_contents("/tmp/process_err");
-			proc_close($res);
-
-			echo 'stdout: ' . $stdout . "";
-			echo 'stderr: ' . $stderr . PHP_EOL;
-		`,
+				echo 'stdout: ' . $stdout . "";
+				echo 'stderr: ' . $stderr . PHP_EOL;
+			`,
+			});
+			expect(result.text).toEqual('stdout: WordPress\nstderr: \n');
 		});
 
-		expect(result.text).toEqual('stdout: WordPress\nstderr: \n');
+		it('echo – stdin=file (empty), stdout=pipe, stderr=pipe', async () => {
+			php.setPhpIniEntry('disable_functions', '');
+			const result = await php.run({
+				code: `<?php
+				file_put_contents('/tmp/process_in', '');
+				$res = proc_open(
+					"echo WordPress",
+					array(
+						array("file","/tmp/process_in", "r"),
+						array("pipe","w"),
+						array("pipe","w"),
+					),
+					$pipes
+				);
+
+				// stream_get_contents yields back to JS event loop internally.
+				$stdout = stream_get_contents($pipes[1]);
+				$stderr = stream_get_contents($pipes[2]);
+				proc_close($res);
+
+				echo 'stdout: ' . $stdout . "";
+				echo 'stderr: ' . $stderr . PHP_EOL;
+			`,
+			});
+			expect(result.text).toEqual('stdout: WordPress\nstderr: \n');
+		});
+
+		it('cat – stdin=pipe, stdout=file, stderr=file', async () => {
+			php.setPhpIniEntry('disable_functions', '');
+			php.setPhpIniEntry('allow_url_fopen', '1');
+			const result = await php.run({
+				code: `<?php
+				$res = proc_open(
+					"cat",
+					array(
+						array("pipe","r"),
+						array("file","/tmp/process_out", "w"),
+						array("file","/tmp/process_err", "w"),
+					),
+					$pipes
+				);
+				fwrite($pipes[0], 'WordPress\n');
+
+				// Yields back to JS event loop to capture and process the 
+				// child_process output. This is fine. Regular PHP scripts
+				// typically wait for the child process to finish.
+				sleep(1);
+				
+				$stdout = file_get_contents("/tmp/process_out");
+				$stderr = file_get_contents("/tmp/process_err");
+				proc_close($res);
+
+				echo 'stdout: ' . $stdout . "";
+				echo 'stderr: ' . $stderr . PHP_EOL;
+			`,
+			});
+			expect(result.text).toEqual('stdout: WordPress\nstderr: \n');
+		});
+
+		it('cat – stdin=file, stdout=file, stderr=file', async () => {
+			php.setPhpIniEntry('disable_functions', '');
+			php.setPhpIniEntry('allow_url_fopen', '1');
+			const result = await php.run({
+				code: `<?php
+				file_put_contents('/tmp/process_in', 'WordPress\n');
+				$res = proc_open(
+					"cat",
+					array(
+						array("file","/tmp/process_in", "r"),
+						array("file","/tmp/process_out", "w"),
+						array("file","/tmp/process_err", "w"),
+					),
+					$pipes
+				);
+
+				// Yields back to JS event loop to capture and process the 
+				// child_process output. This is fine. Regular PHP scripts
+				// typically wait for the child process to finish.
+				sleep(1);
+
+				$stdout = file_get_contents("/tmp/process_out");
+				$stderr = file_get_contents("/tmp/process_err");
+				proc_close($res);
+
+				echo 'stdout: ' . $stdout . "";
+				echo 'stderr: ' . $stderr . PHP_EOL;
+			`,
+			});
+
+			expect(result.text).toEqual('stdout: WordPress\nstderr: \n');
+		});
 	});
 
 	describe('Filesystem', () => {

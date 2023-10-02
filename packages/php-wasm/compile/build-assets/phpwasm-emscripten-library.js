@@ -173,7 +173,7 @@ const LibraryExample = {
 		let dataCallback;
 		const filename = "proc_id_" + procopenCallId;
 		   const device = FS.createDevice("/dev", filename, function () {
-		}, function (byte) {
+		   }, function (byte) {
 			try {
 				dataBuffer.push(byte);
 				if (dataCallback) {
@@ -213,21 +213,8 @@ const LibraryExample = {
 			timeout: 100
 		});
 	   
-		if (PHPWASM.callback_pipes && procopenCallId in PHPWASM.callback_pipes) {
-		   PHPWASM.callback_pipes[procopenCallId].onData(function (data) {
-				// console.log('writing data to stdin', { data })
-				if (!data) return;
-				const dataStr = new TextDecoder("utf-8").decode(data);
-				// console.log({ dataStr });
-				cp.stdin.write(dataStr);
-		   });
-		} else {
-			const stdinStream = SYSCALLS.getStreamFromFD(procopenCallId);
-			console.log({stdinStream})
-		}
-
-		// -1 is an extremely naive way of computing parentend
-		// @TODO pass this in from PHP
+		// Subtracting 1 is an extremely naive way of computing parentend
+		// @TODO pass stdoutParentEnd and stdErrParentEnd from PHP
 		const stdoutStream = SYSCALLS.getStreamFromFD(stdoutFd);
 		cp.on("exit", function (data) {
 			PHPWASM.proc_fds[stdoutFd - 1].exited = true;
@@ -235,20 +222,20 @@ const LibraryExample = {
 			PHPWASM.proc_fds[stderrFd - 1].exited = true;
 			PHPWASM.proc_fds[stderrFd - 1].emit("data");
 		});
-		// @TODO Node.js specific:
+
+		// @TODO Make it isomorphic, not Node.js specific:
 		const EventEmitter = require('events');
 		PHPWASM.proc_fds[stdoutFd - 1] = new EventEmitter();
 		PHPWASM.proc_fds[stderrFd - 1] = new EventEmitter();
 	
 		cp.stdout.on("data", function (data) {
-			// console.log("Writing data", data.toString());
 			PHPWASM.proc_fds[stdoutFd - 1].hasData = true;
 			PHPWASM.proc_fds[stdoutFd - 1].emit("data");
 			stdoutStream.stream_ops.write(stdoutStream, data, 0, data.length, 0);
 		});
 	
-		// -1 is an extremely naive way of computing parentend
-		// @TODO pass this in from PHP
+		// Subtracting 1 is an extremely naive way of computing parentend
+		// @TODO pass stdErrParentEnd from PHP
 		const stderrStream = SYSCALLS.getStreamFromFD(stderrFd);
 		cp.stderr.on("data", function(data) {
 			console.log("Writing error", data.toString());
@@ -258,21 +245,23 @@ const LibraryExample = {
 		});
     
 		// Handle stdin descriptor
-		// If it's a "pipe", it is listed in `callback_pipes` by now.
-		// Let's listen to anything it outputs and pass it to the child process.
 		if (PHPWASM.callback_pipes && procopenCallId in PHPWASM.callback_pipes) {
-		   PHPWASM.callback_pipes[procopenCallId].onData(function(data) {
-			if (!data) return;
-			const dataStr = new TextDecoder("utf-8").decode(data);
-			cp.stdin.write(dataStr);
-		   });
+			// It is a "pipe". By now it is listed in `callback_pipes`.
+			// Let's listen to anything it outputs and pass it to the child process.
+			PHPWASM.callback_pipes[procopenCallId].onData(function(data) {
+				if (!data) return;
+				const dataStr = new TextDecoder("utf-8").decode(data);
+				cp.stdin.write(dataStr);
+			});
 		} else {
-		   // Otherwise, it's a file descriptor.
-		   // Let's pass the already read contents to the child process.
-		   const stdinStream = SYSCALLS.getStreamFromFD(procopenCallId);
-		   const dataStr = new TextDecoder("utf-8").decode(stdinStream.node.contents);
-		   cp.stdin.write(dataStr);
-		 }
+			const stdinStream = SYSCALLS.getStreamFromFD(procopenCallId);
+			if(stdinStream?.node?.contents) {
+				// It is a file descriptor.
+				// Let's pass the already read contents to the child process.
+				const dataStr = new TextDecoder("utf-8").decode(stdinStream.node.contents);
+				cp.stdin.write(dataStr);
+			}
+		}
 	},
 
 	/**
