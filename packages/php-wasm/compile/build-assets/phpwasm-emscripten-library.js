@@ -200,51 +200,76 @@ const LibraryExample = {
 		return allocateUTF8OnStack(devicePath);
 	},
 
-	js_open_process: function (command, procopenCallId, stdoutFd, stderrFd) {
+	/**
+	 * Enables the C code to spawn a Node.js child process for the
+	 * purposes of PHP's proc_open() function.
+	 * 
+	 * @param {int} command Command to execute (string pointer).
+	 * @param {int} procopenCallId Child process end of the stdin pipe (the one to read from).
+	 * @param {int} stdoutChildFd Child process end of the stdout pipe (the one to write to).
+	 * @param {int} stdoutParentFd PHP's end of the stdout pipe (the one to read from).
+	 * @param {int} stderrChildFd Child process end of the stderr pipe (the one to write to).
+	 * @param {int} stderrParentFd PHP's end of the stderr pipe (the one to read from).
+	 * @returns {int} 0 on success, 1 on failure.
+	 */
+	js_open_process: function (
+		command,
+		procopenCallId,
+		stdoutChildFd,
+		stdoutParentFd,
+		stderrChildFd,
+		stderrParentFd
+	) {
+		if (!ENVIRONMENT_IS_NODE) {
+			return 1; // proc_open() is not supported in the browser yet.
+		}
 	    if (!PHPWASM.proc_fds) {
 			PHPWASM.proc_fds = {};
 		}
-		if (!command) return 1;
+		if (!command) {
+			return 1;
+		}
+		
 		const cmdstr = UTF8ToString(command);
-		if (!cmdstr.length) return 0;
+		if (!cmdstr.length) {
+			return 0;
+		}
+
 		const cp = require("child_process").spawn(cmdstr, [], {
 			shell: true,
 			stdio: ["pipe", "pipe", "pipe"],
 			timeout: 100
 		});
 	   
-		// Subtracting 1 is an extremely naive way of computing parentend
-		// @TODO pass stdoutParentEnd and stdErrParentEnd from PHP
-		const stdoutStream = SYSCALLS.getStreamFromFD(stdoutFd);
+		const stdoutStream = SYSCALLS.getStreamFromFD(stdoutChildFd);
 		cp.on("exit", function (data) {
-			PHPWASM.proc_fds[stdoutFd - 1].exited = true;
-			PHPWASM.proc_fds[stdoutFd - 1].emit("data");
-			PHPWASM.proc_fds[stderrFd - 1].exited = true;
-			PHPWASM.proc_fds[stderrFd - 1].emit("data");
+			PHPWASM.proc_fds[stdoutParentFd].exited = true;
+			PHPWASM.proc_fds[stdoutParentFd].emit("data");
+			PHPWASM.proc_fds[stderrParentFd].exited = true;
+			PHPWASM.proc_fds[stderrParentFd].emit("data");
 		});
 
-		// @TODO Make it isomorphic, not Node.js specific:
 		const EventEmitter = require('events');
-		PHPWASM.proc_fds[stdoutFd - 1] = new EventEmitter();
-		PHPWASM.proc_fds[stderrFd - 1] = new EventEmitter();
+		PHPWASM.proc_fds[stdoutParentFd] = new EventEmitter();
+		PHPWASM.proc_fds[stderrParentFd] = new EventEmitter();
 	
+		// Pass data from child process's stdout to PHP's end of the stdout pipe.
 		cp.stdout.on("data", function (data) {
-			PHPWASM.proc_fds[stdoutFd - 1].hasData = true;
-			PHPWASM.proc_fds[stdoutFd - 1].emit("data");
+			PHPWASM.proc_fds[stdoutParentFd].hasData = true;
+			PHPWASM.proc_fds[stdoutParentFd].emit("data");
 			stdoutStream.stream_ops.write(stdoutStream, data, 0, data.length, 0);
 		});
 	
-		// Subtracting 1 is an extremely naive way of computing parentend
-		// @TODO pass stdErrParentEnd from PHP
-		const stderrStream = SYSCALLS.getStreamFromFD(stderrFd);
+		// Pass data from child process's stderr to PHP's end of the stdout pipe.
+		const stderrStream = SYSCALLS.getStreamFromFD(stderrChildFd);
 		cp.stderr.on("data", function(data) {
 			console.log("Writing error", data.toString());
-			PHPWASM.proc_fds[stderrFd - 1].hasData = true;
-			PHPWASM.proc_fds[stderrFd - 1].emit("data");
+			PHPWASM.proc_fds[stderrParentFd].hasData = true;
+			PHPWASM.proc_fds[stderrParentFd].emit("data");
 			stderrStream.stream_ops.write(stderrStream, data, 0, data.length, 0);
 		});
     
-		// Handle stdin descriptor
+		// Pass data from stdin fd to child process's stdin.
 		if (PHPWASM.callback_pipes && procopenCallId in PHPWASM.callback_pipes) {
 			// It is a "pipe". By now it is listed in `callback_pipes`.
 			// Let's listen to anything it outputs and pass it to the child process.
@@ -255,13 +280,14 @@ const LibraryExample = {
 			});
 		} else {
 			const stdinStream = SYSCALLS.getStreamFromFD(procopenCallId);
-			if(stdinStream?.node?.contents) {
+			if(stdinStream.node.contents) {
 				// It is a file descriptor.
 				// Let's pass the already read contents to the child process.
 				const dataStr = new TextDecoder("utf-8").decode(stdinStream.node.contents);
 				cp.stdin.write(dataStr);
 			}
 		}
+		return 0;
 	},
 
 	/**

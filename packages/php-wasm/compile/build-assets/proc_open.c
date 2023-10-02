@@ -457,7 +457,7 @@ static char *create_win_command_from_args(HashTable *args) {
 }
 #endif
 
-extern void *js_open_process(const char *command, int procopen_call_nb, int out, int err);
+extern void *js_open_process(const char *command, int procopen_call_nb, int out_childend, int out_parentend, int err_childend, int err_parentend);
 extern char *js_create_input_device(int procopen_call_nb);
 
 static int procopen_call_id = 0;
@@ -726,7 +726,14 @@ PHP_FUNCTION(proc_open)
 	} ZEND_HASH_FOREACH_END();
 
     // the wasm way {{{
-    js_open_process(command, descriptors[0].childend, descriptors[1].childend, descriptors[2].childend);
+    js_open_process(
+		command, 
+		descriptors[0].childend, 
+		descriptors[1].childend, 
+		descriptors[1].parentend, 
+		descriptors[2].childend,
+		descriptors[2].parentend
+	);
     // }}}
 
 	/* we forked/spawned and this is the parent */

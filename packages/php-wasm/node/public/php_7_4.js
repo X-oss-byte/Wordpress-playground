@@ -1,6 +1,6 @@
 const dependencyFilename = __dirname + '/php_7_4.wasm'; 
  export { dependencyFilename }; 
-export const dependenciesTotalSize = 11021724; 
+export const dependenciesTotalSize = 11021796; 
 export function init(RuntimeName, PHPLoader) {
     /**
      * Overrides Emscripten's default ExitStatus object which gets
@@ -5530,8 +5530,7 @@ function _js_create_input_device(procopenCallId) {
    throw e;
   }
  });
- 
-    const devicePath = "/dev/" + filename;
+ const devicePath = "/dev/" + filename;
  PHPWASM.callback_pipes[procopenCallId] = {
   devicePath: devicePath,
   onData: function(cb) {
@@ -5552,62 +5551,57 @@ function _js_module_onMessage(data) {
  }
 }
 
-function _js_open_process(command, procopenCallId, stdoutFd, stderrFd) {
+function _js_open_process(command, procopenCallId, stdoutChildFd, stdoutParentFd, stderrChildFd, stderrParentFd) {
  if (!PHPWASM.proc_fds) {
   PHPWASM.proc_fds = {};
  }
- if (!command) return 1;
+ if (!command) {
+  return 1;
+ }
  const cmdstr = UTF8ToString(command);
- if (!cmdstr.length) return 0;
+ if (!cmdstr.length) {
+  return 0;
+ }
  const cp = require("child_process").spawn(cmdstr, [], {
   shell: true,
   stdio: [ "pipe", "pipe", "pipe" ],
   timeout: 100
  });
-    
- const stdoutStream = SYSCALLS.getStreamFromFD(stdoutFd);
+ const stdoutStream = SYSCALLS.getStreamFromFD(stdoutChildFd);
  cp.on("exit", function(data) {
-  PHPWASM.proc_fds[stdoutFd - 1].exited = true;
-  PHPWASM.proc_fds[stdoutFd - 1].emit("data");
-  PHPWASM.proc_fds[stderrFd - 1].exited = true;
-  PHPWASM.proc_fds[stderrFd - 1].emit("data");
+  PHPWASM.proc_fds[stdoutParentFd].exited = true;
+  PHPWASM.proc_fds[stdoutParentFd].emit("data");
+  PHPWASM.proc_fds[stderrParentFd].exited = true;
+  PHPWASM.proc_fds[stderrParentFd].emit("data");
  });
  const EventEmitter = require("events");
- PHPWASM.proc_fds[stdoutFd - 1] = new EventEmitter();
- PHPWASM.proc_fds[stderrFd - 1] = new EventEmitter();
+ PHPWASM.proc_fds[stdoutParentFd] = new EventEmitter();
+ PHPWASM.proc_fds[stderrParentFd] = new EventEmitter();
  cp.stdout.on("data", function(data) {
-  PHPWASM.proc_fds[stdoutFd - 1].hasData = true;
-  PHPWASM.proc_fds[stdoutFd - 1].emit("data");
+  PHPWASM.proc_fds[stdoutParentFd].hasData = true;
+  PHPWASM.proc_fds[stdoutParentFd].emit("data");
   stdoutStream.stream_ops.write(stdoutStream, data, 0, data.length, 0);
  });
- const stderrStream = SYSCALLS.getStreamFromFD(stderrFd);
+ const stderrStream = SYSCALLS.getStreamFromFD(stderrChildFd);
  cp.stderr.on("data", function(data) {
   console.log("Writing error", data.toString());
-  PHPWASM.proc_fds[stderrFd - 1].hasData = true;
-  PHPWASM.proc_fds[stderrFd - 1].emit("data");
+  PHPWASM.proc_fds[stderrParentFd].hasData = true;
+  PHPWASM.proc_fds[stderrParentFd].emit("data");
   stderrStream.stream_ops.write(stderrStream, data, 0, data.length, 0);
  });
-    
- // Handle stdin descriptor
  if (PHPWASM.callback_pipes && procopenCallId in PHPWASM.callback_pipes) {
-    // It is a "pipe". By now it is listed in `callback_pipes`.
-    // Let's listen to anything it outputs and pass it to the child process.
-    PHPWASM.callback_pipes[procopenCallId].onData(function(data) {
-     if (!data) return;
-     const dataStr = new TextDecoder("utf-8").decode(data);
-     cp.stdin.write(dataStr);
-    });
+  PHPWASM.callback_pipes[procopenCallId].onData(function(data) {
+   if (!data) return;
+   const dataStr = new TextDecoder("utf-8").decode(data);
+   cp.stdin.write(dataStr);
+  });
  } else {
-    const stdinStream = SYSCALLS.getStreamFromFD(procopenCallId);
-    if(stdinStream?.node?.contents) {
-        // It is a file descriptor.
-        // Let's pass the already read contents to the child process.
-        const dataStr = new TextDecoder("utf-8").decode(stdinStream.node.contents);
-        cp.stdin.write(dataStr);
-    }
+  const stdinStream = SYSCALLS.getStreamFromFD(procopenCallId);
+  if (stdinStream.node.contents) {
+   const dataStr = new TextDecoder("utf-8").decode(stdinStream.node.contents);
+   cp.stdin.write(dataStr);
+  }
  }
-      
-  
 }
 
 function _js_popen_to_file(command, mode, exitCodePtr) {
