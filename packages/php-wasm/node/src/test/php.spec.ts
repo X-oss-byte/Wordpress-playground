@@ -2,7 +2,7 @@ import { getPHPLoaderModule, NodePHP } from '..';
 import { vi } from 'vitest';
 import {
 	loadPHPRuntime,
-	SupportedPHPVersions,
+	// SupportedPHPVersions,
 	__private__dont__use,
 } from '@php-wasm/universal';
 import { existsSync, rmSync, readFileSync } from 'fs';
@@ -13,7 +13,7 @@ const testFilePath = '/__test987654321.txt';
 describe.each(['7.4'])('PHP %s', (phpVersion) => {
 	let php: NodePHP;
 	beforeEach(async () => {
-		php = await NodePHP.load(phpVersion);
+		php = await NodePHP.load(phpVersion as any);
 	});
 
 	describe('proc_open()', () => {
@@ -385,10 +385,10 @@ describe.each(['7.4'])('PHP %s', (phpVersion) => {
 		 * the first call.
 		 */
 		it('Should spawn two PHP runtimes', async () => {
-			const phpLoaderModule1 = await getPHPLoaderModule(phpVersion);
+			const phpLoaderModule1 = await getPHPLoaderModule(phpVersion as any);
 			const runtimeId1 = await loadPHPRuntime(phpLoaderModule1);
 
-			const phpLoaderModule2 = await getPHPLoaderModule(phpVersion);
+			const phpLoaderModule2 = await getPHPLoaderModule(phpVersion as any);
 			const runtimeId2 = await loadPHPRuntime(phpLoaderModule2);
 
 			expect(runtimeId1).not.toEqual(runtimeId2);
