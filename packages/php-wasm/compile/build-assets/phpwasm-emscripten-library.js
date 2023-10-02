@@ -135,6 +135,28 @@ const LibraryExample = {
 			return [promise, cancel];
 		},
 		noop: function () { },
+
+		spawnProcess: function (command) {
+			if (Module['spawnProcess']) {
+				const spawned = Module['spawnProcess'](command);
+				if (!spawned || !spawned.on) {
+					throw new Error("spawnProcess() must return an EventEmitter but returned a different type.");
+				}
+				return spawned;
+			}
+
+			if (ENVIRONMENT_IS_NODE) {
+				return require("child_process").spawn(command, [], {
+					shell: true,
+					stdio: ["pipe", "pipe", "pipe"],
+					timeout: 100
+				});
+			}
+
+			const e = new Error("proc_open() is not supported in the browser yet.");
+			e.code = "SPAWN_UNSUPPORTED";
+			throw e;
+		},
 		
 		/**
 		 * Shims unix shutdown(2) functionallity for asynchronous websockets:
@@ -165,6 +187,13 @@ const LibraryExample = {
 		}
 	},
 
+	/**
+	 * Creates an emscripten input device for the purposes of PHP's 
+	 * proc_open() function.
+	 * 
+	 * @param {int} procopenCallId 
+	 * @returns {int} The path of the input devicex (string pointer).
+	 */
 	js_create_input_device: function (procopenCallId) {
 		if (!PHPWASM.callback_pipes) {
 			PHPWASM.callback_pipes = {};
@@ -172,8 +201,8 @@ const LibraryExample = {
 		let dataBuffer = [];
 		let dataCallback;
 		const filename = "proc_id_" + procopenCallId;
-		   const device = FS.createDevice("/dev", filename, function () {
-		   }, function (byte) {
+		const device = FS.createDevice("/dev", filename, function () {
+		}, function (byte) {
 			try {
 				dataBuffer.push(byte);
 				if (dataCallback) {
@@ -220,9 +249,6 @@ const LibraryExample = {
 		stderrChildFd,
 		stderrParentFd
 	) {
-		if (!ENVIRONMENT_IS_NODE) {
-			return 1; // proc_open() is not supported in the browser yet.
-		}
 	    if (!PHPWASM.proc_fds) {
 			PHPWASM.proc_fds = {};
 		}
@@ -235,11 +261,15 @@ const LibraryExample = {
 			return 0;
 		}
 
-		const cp = require("child_process").spawn(cmdstr, [], {
-			shell: true,
-			stdio: ["pipe", "pipe", "pipe"],
-			timeout: 100
-		});
+		let cp;
+		try {
+			cp = PHPWASM.spawnProcess(cmdstr);
+		} catch (e) {
+			if (e.code === "SPAWN_UNSUPPORTED") {
+				return 1;
+			}
+			throw e;
+		}
 	   
 		const stdoutStream = SYSCALLS.getStreamFromFD(stdoutChildFd);
 		cp.on("exit", function (data) {
@@ -249,7 +279,12 @@ const LibraryExample = {
 			PHPWASM.proc_fds[stderrParentFd].emit("data");
 		});
 
-		const EventEmitter = require('events');
+		let EventEmitter;
+		if (ENVIRONMENT_IS_NODE) {
+			EventEmitter = require('events').EventEmitter;
+		} else {
+			EventEmitter = global.EventEmitter;
+		}
 		PHPWASM.proc_fds[stdoutParentFd] = new EventEmitter();
 		PHPWASM.proc_fds[stderrParentFd] = new EventEmitter();
 	
@@ -278,15 +313,33 @@ const LibraryExample = {
 				const dataStr = new TextDecoder("utf-8").decode(data);
 				cp.stdin.write(dataStr);
 			});
-		} else {
-			const stdinStream = SYSCALLS.getStreamFromFD(procopenCallId);
-			if(stdinStream.node.contents) {
-				// It is a file descriptor.
-				// Let's pass the already read contents to the child process.
-				const dataStr = new TextDecoder("utf-8").decode(stdinStream.node.contents);
-				cp.stdin.write(dataStr);
-			}
+			return 0;
 		}
+
+		// It is a file descriptor.
+		// Let's pass the already read contents to the child process.
+		const stdinStream = SYSCALLS.getStreamFromFD(procopenCallId);
+		if (!stdinStream.node) {
+			return 0;
+		}
+
+        // Pipe the entire stdinStream to cp.stdin
+        const CHUNK_SIZE = 1024;
+        const buffer = Buffer.alloc(CHUNK_SIZE);
+        let offset = 0;
+  		
+        while (true) {
+            const bytesRead = stdinStream.stream_ops.read(stdinStream, buffer, offset, CHUNK_SIZE, null);
+            if (bytesRead === null) {
+                break;
+            }
+            cp.stdin.write(buffer.subarray(0, bytesRead));
+            if (bytesRead < CHUNK_SIZE) {
+                break;
+            }
+            offset += bytesRead;
+        }
+
 		return 0;
 	},
 

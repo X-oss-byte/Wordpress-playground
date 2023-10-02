@@ -71,6 +71,11 @@ export abstract class BasePHP implements IsomorphicLocalPHP {
 	}
 
 	/** @inheritDoc */
+	async setSpawnHandler(listener: MessageListener) {
+		this[__private__dont__use].spawnProcess = listener;
+	}
+
+	/** @inheritDoc */
 	get absoluteUrl() {
 		return this.requestHandler!.requestHandler.absoluteUrl;
 	}

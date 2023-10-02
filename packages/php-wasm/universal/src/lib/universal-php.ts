@@ -364,9 +364,27 @@ export interface IsomorphicLocalPHP extends RequestHandler {
 	 * @param listener Callback function to handle the message.
 	 */
 	onMessage(listener: MessageListener): void;
+
+	/**
+	 * Registers a handler to spawns a child process when
+	 * `proc_open()` is called.
+	 * 
+	 * @TODO Use this handler also for `popen()`, `exec()` etc.
+	 * @param listener Callback function to spawn a process.
+	 */
+	setSpawnHandler(listener: SpawnHandler): void;
 }
 
 export type MessageListener = (data: string) => void;
+interface EventEmitter {
+	on(event: string, listener: (...args: any[]) => void): this;
+	emit(event: string, ...args: any[]): boolean;
+}
+type ChildProcess = EventEmitter & {
+	stdout: EventEmitter;
+	stderr: EventEmitter;
+}
+export type SpawnHandler = (command: string) => ChildProcess;
 
 export type IsomorphicRemotePHP = Remote<IsomorphicLocalPHP>;
 export type UniversalPHP = IsomorphicLocalPHP | IsomorphicRemotePHP;

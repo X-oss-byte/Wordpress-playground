@@ -11,6 +11,7 @@ import {
 } from '@php-wasm/universal';
 
 import { NodePHP } from '@php-wasm/node';
+import { spawn } from 'child_process';
 
 let args = process.argv.slice(2);
 if (!args.length) {
@@ -40,7 +41,15 @@ const php = await NodePHP.load(phpVersion, {
 		},
 	},
 });
+
 php.useHostFilesystem();
+php.setSpawnHandler((command: string) => {
+	return spawn(command, [], {
+		shell: true,
+		stdio: ["pipe", "pipe", "pipe"],
+		timeout: 100
+	});
+});
 
 const hasMinusCOption = args.some((arg) => arg.startsWith('-c'));
 if (!hasMinusCOption) {

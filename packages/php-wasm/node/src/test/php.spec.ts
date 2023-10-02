@@ -14,11 +14,11 @@ describe.each(['7.4'])('PHP %s', (phpVersion) => {
 	let php: NodePHP;
 	beforeEach(async () => {
 		php = await NodePHP.load(phpVersion as any);
+		php.setPhpIniEntry('disable_functions', '');
 	});
 
 	describe('proc_open()', () => {
 		it('echo – stdin=file (empty), stdout=file, stderr=file', async () => {
-			php.setPhpIniEntry('disable_functions', '');
 			const result = await php.run({
 				code: `<?php
 				file_put_contents('/tmp/process_in', '');
@@ -48,7 +48,6 @@ describe.each(['7.4'])('PHP %s', (phpVersion) => {
 		});
 
 		it('echo – stdin=file (empty), stdout=pipe, stderr=pipe', async () => {
-			php.setPhpIniEntry('disable_functions', '');
 			const result = await php.run({
 				code: `<?php
 				file_put_contents('/tmp/process_in', '');
@@ -75,8 +74,6 @@ describe.each(['7.4'])('PHP %s', (phpVersion) => {
 		});
 
 		it('cat – stdin=pipe, stdout=file, stderr=file', async () => {
-			php.setPhpIniEntry('disable_functions', '');
-			php.setPhpIniEntry('allow_url_fopen', '1');
 			const result = await php.run({
 				code: `<?php
 				$res = proc_open(
@@ -107,8 +104,6 @@ describe.each(['7.4'])('PHP %s', (phpVersion) => {
 		});
 
 		it('cat – stdin=file, stdout=file, stderr=file', async () => {
-			php.setPhpIniEntry('disable_functions', '');
-			php.setPhpIniEntry('allow_url_fopen', '1');
 			const result = await php.run({
 				code: `<?php
 				file_put_contents('/tmp/process_in', 'WordPress\n');
@@ -137,6 +132,41 @@ describe.each(['7.4'])('PHP %s', (phpVersion) => {
 			});
 
 			expect(result.text).toEqual('stdout: WordPress\nstderr: \n');
+		});
+
+		it('Uses the specified spawn handler', async () => {
+			let spawnHandlerCalled = false;
+			php.setSpawnHandler(() => {
+				spawnHandlerCalled = true;
+				return {
+					stdout: {
+						on: () => { },
+					},
+					stderr: {
+						on: () => { },
+					},
+					stdin: {
+						write: () => { },
+					},
+					on: () => { },
+					kill: () => { },
+				} as any;
+			});
+			await php.run({
+				code: `<?php
+				$res = proc_open(
+					"echo 'Hello World!'",
+					array(
+						array("pipe","r"),
+						array("pipe","w"),
+						array("pipe","w"),
+					),
+					$pipes
+				);
+				proc_close($res);
+			`,
+			});
+			expect(spawnHandlerCalled).toEqual(true);
 		});
 	});
 
@@ -385,10 +415,14 @@ describe.each(['7.4'])('PHP %s', (phpVersion) => {
 		 * the first call.
 		 */
 		it('Should spawn two PHP runtimes', async () => {
-			const phpLoaderModule1 = await getPHPLoaderModule(phpVersion as any);
+			const phpLoaderModule1 = await getPHPLoaderModule(
+				phpVersion as any
+			);
 			const runtimeId1 = await loadPHPRuntime(phpLoaderModule1);
 
-			const phpLoaderModule2 = await getPHPLoaderModule(phpVersion as any);
+			const phpLoaderModule2 = await getPHPLoaderModule(
+				phpVersion as any
+			);
 			const runtimeId2 = await loadPHPRuntime(phpLoaderModule2);
 
 			expect(runtimeId1).not.toEqual(runtimeId2);
