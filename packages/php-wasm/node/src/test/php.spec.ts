@@ -140,16 +140,16 @@ describe.each(['7.4'])('PHP %s', (phpVersion) => {
 				spawnHandlerCalled = true;
 				return {
 					stdout: {
-						on: () => { },
+						on: () => {},
 					},
 					stderr: {
-						on: () => { },
+						on: () => {},
 					},
 					stdin: {
-						write: () => { },
+						write: () => {},
 					},
-					on: () => { },
-					kill: () => { },
+					on: () => {},
+					kill: () => {},
 				} as any;
 			});
 			await php.run({
