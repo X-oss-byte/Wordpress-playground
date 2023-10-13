@@ -104,7 +104,7 @@ button:focus {
 	display: flex;
 	align-items: center;
 }
-#gutenberg-pr {
+#pr-number {
 	width: 280px;
 	margin-right: 4px;
 }
