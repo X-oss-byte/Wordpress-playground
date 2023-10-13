@@ -1,8 +1,8 @@
 import { WebPHP, WebPHPEndpoint, exposeAPI } from '@php-wasm/web';
 import { EmscriptenDownloadMonitor } from '@php-wasm/progress';
-import { setURLScope } from '@php-wasm/scopes';
+import { removeURLScope, setURLScope } from '@php-wasm/scopes';
+import { joinPaths } from '@php-wasm/util';
 import { DOCROOT, wordPressSiteUrl } from './config';
-import { isUploadedFilePath } from './is-uploaded-file-path';
 import {
 	getWordPressModule,
 	LatestSupportedWordPressVersion,
@@ -85,7 +85,6 @@ const { php, phpReady } = WebPHP.loadSync(phpVersion, {
 	requestHandler: {
 		documentRoot: DOCROOT,
 		absoluteUrl: scopedSiteUrl,
-		isStaticFilePath: isUploadedFilePath,
 	},
 	// We don't yet support loading specific PHP extensions one-by-one.
 	// Let's just indicate whether we want to load all of them.
@@ -137,6 +136,14 @@ export class PlaygroundWorkerEndpoint extends WebPHPEndpoint {
 		};
 	}
 
+	async requestedPathIsAStaticFile(requestPath: string) {
+		const unscopedPath = removeURLScope(
+			new URL(requestPath, this.absoluteUrl)
+		).pathname;
+		const fsPath = joinPaths(this.documentRoot, unscopedPath);
+		return this.fileExists(fsPath);
+	}
+
 	async resetVirtualOpfs() {
 		if (!virtualOpfsRoot) {
 			throw new Error('No virtual OPFS available.');
@@ -184,6 +191,7 @@ try {
 			disableWpNewBlogNotification: true,
 			addPhpInfo: true,
 			disableSiteHealth: true,
+			makeEditorFrameControlled: true,
 		});
 	}
 

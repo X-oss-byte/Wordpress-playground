@@ -11,7 +11,6 @@ import {
 	cloneRequest,
 	broadcastMessageExpectReply,
 } from '@php-wasm/web-service-worker';
-import { isUploadedFilePath } from './src/lib/is-uploaded-file-path';
 
 if (!(self as any).document) {
 	// Workaround: vite translates import.meta.url
@@ -40,15 +39,15 @@ initializeServiceWorker({
 		}
 		event.preventDefault();
 		async function asyncHandler() {
-			const { staticAssetsDirectory, defaultTheme } =
-				await getScopedWpDetails(scope!);
-			if (
-				(seemsLikeAPHPRequestHandlerPath(unscopedUrl.pathname) ||
-					isUploadedFilePath(unscopedUrl.pathname)) &&
-				!unscopedUrl.pathname.startsWith(
-					`/wp-content/themes/${defaultTheme}`
-				)
-			) {
+			const { staticAssetsDirectory } = await getScopedWpDetails(scope!);
+			const shouldHandleInWorker =
+				seemsLikeAPHPRequestHandlerPath(unscopedUrl.pathname) ||
+				(await requestedPathIsAStaticFile(
+					scope!,
+					unscopedUrl.pathname
+				));
+
+			if (shouldHandleInWorker) {
 				const response = await convertFetchEventToPHPRequest(event);
 				response.headers.set(
 					'Cross-Origin-Resource-Policy',
@@ -106,4 +105,18 @@ async function getScopedWpDetails(scope: string): Promise<WPModuleDetails> {
 		scopeToWpModule[scope] = await awaitReply(self, requestId);
 	}
 	return scopeToWpModule[scope];
+}
+
+async function requestedPathIsAStaticFile(
+	scope: string,
+	path: string
+): Promise<WPModuleDetails> {
+	const requestId = await broadcastMessageExpectReply(
+		{
+			method: 'requestedPathIsAStaticFile',
+			args: [path],
+		},
+		scope
+	);
+	return await awaitReply(self, requestId);
 }

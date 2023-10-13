@@ -252,7 +252,13 @@ try {
                 'repo' => 'woocommerce',
                 'workflow' => 'Build Live Branch',
                 'artifact' => 'plugins'
-            ]
+            ],
+            [
+                'org' => 'WordPress',
+                'repo' => 'wordpress-develop',
+                'workflow' => 'Test npm',
+                'artifact' => 'wordpress-build-dev'
+            ],
         ];
         $allowed = false;
         foreach ($allowedInputs as $allowedInput) {

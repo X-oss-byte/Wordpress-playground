@@ -16,7 +16,6 @@ describe.each(SupportedPHPVersions)(
 			php = new NodePHP(runtimeId);
 			handler = new PHPRequestHandler(php, {
 				documentRoot: '/',
-				isStaticFilePath: (path) => !path.endsWith('.php'),
 			});
 		});
 
@@ -171,8 +170,6 @@ describe.each(SupportedPHPVersions)(
 			php.mkdirTree('/var/www');
 			handler = new PHPRequestHandler(php, {
 				documentRoot: '/var/www',
-				// Treat all files as dynamic
-				isStaticFilePath: () => false,
 			});
 		});
 

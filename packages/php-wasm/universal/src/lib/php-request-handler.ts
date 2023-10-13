@@ -13,6 +13,7 @@ import {
 	PHPRunOptions,
 	RequestHandler,
 } from './universal-php';
+import { seemsLikeAPHPRequestHandlerPath } from '@php-wasm/web-service-worker';
 
 export interface PHPRequestHandlerConfiguration {
 	/**
@@ -24,11 +25,6 @@ export interface PHPRequestHandlerConfiguration {
 	 * Request Handler URL. Used to populate $_SERVER details like HTTP_HOST.
 	 */
 	absoluteUrl?: string;
-	/**
-	 * Callback used by the PHPRequestHandler to decide whether
-	 * the requested path refers to a PHP file or a static file.
-	 */
-	isStaticFilePath?: (path: string) => boolean;
 }
 
 /** @inheritDoc */
@@ -46,7 +42,6 @@ export class PHPRequestHandler implements RequestHandler {
 	 * The PHP instance
 	 */
 	php: BasePHP;
-	#isStaticFilePath: (path: string) => boolean;
 
 	/**
 	 * @param  php    - The PHP instance.
@@ -57,11 +52,9 @@ export class PHPRequestHandler implements RequestHandler {
 		const {
 			documentRoot = '/www/',
 			absoluteUrl = typeof location === 'object' ? location?.href : '',
-			isStaticFilePath = () => false,
 		} = config;
 		this.php = php;
 		this.#DOCROOT = documentRoot;
-		this.#isStaticFilePath = isStaticFilePath;
 
 		const url = new URL(absoluteUrl);
 		this.#HOSTNAME = url.hostname;
@@ -122,12 +115,17 @@ export class PHPRequestHandler implements RequestHandler {
 			isAbsolute ? undefined : DEFAULT_BASE_URL
 		);
 
-		const normalizedRelativeUrl = removePathPrefix(
+		const normalizedRequestedPath = removePathPrefix(
 			requestedUrl.pathname,
 			this.#PATHNAME
 		);
-		if (this.#isStaticFilePath(normalizedRelativeUrl)) {
-			return this.#serveStaticFile(normalizedRelativeUrl);
+		const fsPath = `${this.#DOCROOT}${normalizedRequestedPath}`;
+		if (
+			this.php.fileExists(fsPath) &&
+			!this.php.isDir(fsPath) &&
+			!seemsLikeAPHPRequestHandlerPath(fsPath)
+		) {
+			return this.#serveStaticFile(fsPath);
 		}
 		return await this.#dispatchToPHP(request, requestedUrl);
 	}
@@ -135,12 +133,10 @@ export class PHPRequestHandler implements RequestHandler {
 	/**
 	 * Serves a static file from the PHP filesystem.
 	 *
-	 * @param  path - The requested static file path.
+	 * @param  fsPath - Absolute path of the static file to serve.
 	 * @returns The response.
 	 */
-	#serveStaticFile(path: string): PHPResponse {
-		const fsPath = `${this.#DOCROOT}${path}`;
-
+	#serveStaticFile(fsPath: string): PHPResponse {
 		if (!this.php.fileExists(fsPath)) {
 			return new PHPResponse(
 				404,
